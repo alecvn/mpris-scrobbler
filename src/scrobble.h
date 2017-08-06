@@ -360,23 +360,23 @@ struct mpris_properties* scrobbles_peek_queue(struct mpris_player *player, size_
     return NULL;
 }
 
-void load_event(mpris_event* e, const mpris_properties *p, const struct state *state)
+void load_event(mpris_event* e, const struct state *state)
 {
     if (NULL == e) { goto _return; }
-    if (NULL == p) { goto _return; }
-    if (NULL == p->metadata) { goto _return; }
-    e->player_state = get_mpris_playback_status(p);
-    e->track_changed = false;
-    e->volume_changed = false;
-    e->playback_status_changed = false;
-
     if (NULL == state) { goto _return; }
 
     const struct mpris_player *player = state->player;
 
     e->playback_status_changed = (e->player_state != player->player_state);
 
-    mpris_properties *last = player->current;
+    mpris_properties *p = player->properties;
+    if (NULL == p->metadata) { goto _return; }
+    e->player_state = get_mpris_playback_status(p);
+    e->track_changed = false;
+    e->volume_changed = false;
+    e->playback_status_changed = false;
+
+    const mpris_properties *last = player->current;
     if (NULL == last) { goto _return; }
     if (NULL == last->metadata) { goto _return; }
 

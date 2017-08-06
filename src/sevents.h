@@ -174,7 +174,7 @@ static void add_event_scrobble(struct state *state)
 void state_loaded_properties(struct state *state, mpris_properties *properties)
 {
     mpris_event what_happened;
-    load_event(&what_happened, properties, state);
+    load_event(&what_happened, state);
 
     struct scrobble *scrobble = scrobble_new();
     load_scrobble(scrobble, properties);
