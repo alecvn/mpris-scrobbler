@@ -127,11 +127,14 @@ static void scrobbler_free(struct scrobbler *s)
 static void mpris_player_free(struct mpris_player *player)
 {
     _trace("mem::freeing_player(%p)::queue_length:%u", player, player->queue_length);
-    for (unsigned i = 0; i < player->queue_length; i++) {
+    for (size_t i = 0; i < player->queue_length; i++) {
         mpris_properties_free(player->queue[i]);
+        player->queue[i] = NULL;
     }
     if (NULL != player->mpris_name) { free(player->mpris_name); }
     if (NULL != player->properties) { mpris_properties_free(player->properties); }
+    if (NULL != player->current) { mpris_properties_free(player->current); }
+    if (NULL != player->previous) { mpris_properties_free(player->previous); }
 
     free (player);
 }
@@ -175,6 +178,8 @@ static void mpris_player_init(struct mpris_player *player, DBusConnection *conn)
     player->queue_length = 0;
     player->player_state = stopped;
     player->mpris_name = NULL;
+    player->current = calloc(1, sizeof(mpris_properties));
+    player->previous = calloc(1, sizeof(mpris_properties));
 
     if (NULL != conn) {
         player->properties = mpris_properties_new();
@@ -199,9 +204,12 @@ static void state_init(struct state *s)
 
     s->events = events_new();
     s->dbus = dbus_connection_init(s);
+
     mpris_player_init(s->player, s->dbus->conn);
     state_loaded_properties(s, s->player->properties);
+#if 0
     add_event_ping(s);
+#endif
 
     _trace("mem::inited_state(%p)", s);
 }
@@ -364,12 +372,23 @@ void load_event(mpris_event* e, const struct state *state)
 {
     if (NULL == e) { goto _return; }
     if (NULL == state) { goto _return; }
+    if (NULL == state->player) { goto _return; }
 
     const struct mpris_player *player = state->player;
+    if (NULL == player->properties) { goto _return; }
+
+    const mpris_properties *p = player->properties;
+    if (NULL == player->current || player->queue_length == 0) {
+        e->player_state = get_mpris_playback_status(p);
+        e->track_changed = true;
+        e->volume_changed = true;
+        e->playback_status_changed = true;
+
+        return;
+    }
 
     e->playback_status_changed = (e->player_state != player->player_state);
 
-    mpris_properties *p = player->properties;
     if (NULL == p->metadata) { goto _return; }
     e->player_state = get_mpris_playback_status(p);
     e->track_changed = false;
@@ -501,6 +520,7 @@ static void lastfm_now_playing(struct scrobbler *s, const struct scrobble *track
 
     for (size_t i = 0; i < s->credentials_length; i++) {
         struct api_credentials *cur = s->credentials[i];
+        if (NULL == cur) { return; }
         _trace("api::submit_to[%s]", get_api_type_label(cur->end_point));
         if (s->credentials[i]->enabled) {
             struct http_request *req = api_build_request_now_playing(track, s->curl, cur->end_point);
