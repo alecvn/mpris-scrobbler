@@ -135,15 +135,18 @@ typedef struct dbus {
     DBusTimeout *timeout;
 } dbus;
 
+//typedef union queue {
+//} queue;
+
 struct mpris_player {
     char *mpris_name;
     mpris_properties *properties;
     union {
         struct {
-            struct scrobble *current;
-            struct scrobble *previous;
+            struct mpris_properties *current;
+            struct mpris_properties *previous;
         };
-        struct scrobble *queue[QUEUE_MAX_LENGTH];
+        struct mpris_properties *queue[QUEUE_MAX_LENGTH];
     };
     size_t queue_length;
     playback_state player_state;
@@ -156,6 +159,5 @@ struct state {
     struct events *events;
 
 };
-
 
 #endif // STRUCTS_H

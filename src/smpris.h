@@ -7,7 +7,6 @@
 #define MPRIS_PLAYBACK_STATUS_PAUSED   "Paused"
 #define MPRIS_PLAYBACK_STATUS_STOPPED  "Stopped"
 
-#if 0
 static void mpris_metadata_zero(mpris_metadata* metadata)
 {
     metadata->track_number = 0;
@@ -27,7 +26,6 @@ static void mpris_metadata_zero(mpris_metadata* metadata)
     if (NULL != metadata->track_id) { free(metadata->track_id); metadata->track_id = NULL; }
     _trace("mem::zeroed_metadata(%p)", metadata);
 }
-#endif
 
 static void mpris_metadata_init(mpris_metadata* metadata)
 {
@@ -115,8 +113,7 @@ static void mpris_metadata_free(mpris_metadata *metadata)
     free(metadata);
 }
 
-#if 0
-static void mpris_properties_zero(mpris_properties *properties, bool metadata_too)
+void mpris_properties_zero(mpris_properties *properties, bool metadata_too)
 {
     properties->volume = 0;
     properties->position = 0;
@@ -133,7 +130,6 @@ static void mpris_properties_zero(mpris_properties *properties, bool metadata_to
     if (metadata_too) { mpris_metadata_zero(properties->metadata); }
     _trace("mem::zeroed_properties(%p)", properties);
 }
-#endif
 
 static void mpris_properties_init(mpris_properties *properties)
 {
@@ -184,7 +180,6 @@ void mpris_properties_free(mpris_properties *properties)
     free(properties);
 }
 
-#if 0
 static void mpris_metadata_copy(mpris_metadata  *d, const mpris_metadata *s)
 {
     if (NULL == s) { return; }
@@ -229,7 +224,6 @@ static void mpris_properties_copy(mpris_properties *d, const mpris_properties* s
     d->can_seek = s->can_seek;
     d->shuffle = s->shuffle;
 }
-#endif
 
 static bool mpris_properties_is_playing(const mpris_properties *s)
 {

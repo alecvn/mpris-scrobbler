@@ -440,7 +440,7 @@ static char* get_dbus_string_scalar(DBusMessage* message)
 }
 #endif
 
-#if 0
+#if 1
 bool ping_player(DBusConnection* conn, const char* destination)
 {
     bool available = false;
@@ -455,7 +455,7 @@ bool ping_player(DBusConnection* conn, const char* destination)
     char* method = DBUS_METHOD_PING;
     char* path = MPRIS_PLAYER_PATH;
 
-    msg = dbus_message_new_method_call("org.mpris.MediaPlayer21", path, interface, method);
+    msg = dbus_message_new_method_call("org.mpris.MediaPlayer2", path, interface, method);
     if (NULL == msg) { return available; }
 
    // send message and get a handle for a reply
@@ -813,6 +813,7 @@ static void handle_dispatch_status(DBusConnection *conn, DBusDispatchStatus stat
     }
     if (status == DBUS_DISPATCH_COMPLETE) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "COMPLETE");
+        state_loaded_properties(state, state->player->properties);
     }
     if (status == DBUS_DISPATCH_NEED_MEMORY) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "OUT_OF_MEMORY");
@@ -888,16 +889,13 @@ static void toggle_watch(DBusWatch *watch, void *data)
     }
 }
 
-void state_loaded_properties(struct state *, mpris_properties *);
+//void state_loaded_properties(struct state *, mpris_properties *);
 static DBusHandlerResult add_filter(DBusConnection *conn, DBusMessage *message, void *data)
 {
     struct state *state = data;
     if (dbus_message_is_signal(message, DBUS_PROPERTIES_INTERFACE, MPRIS_SIGNAL_PROPERTIES_CHANGED)) {
         _trace("dbus::filter(%p): received valid signal", message);
-        mpris_properties *properties = mpris_properties_new();
-        DBusHandlerResult result = load_properties_from_message(message, properties);
-        state_loaded_properties(state, properties);
-        mpris_properties_free(properties);
+        DBusHandlerResult result = load_properties_from_message(message, state->player->properties);
         return result;
     } else {
         _trace("dbus::filter:unknown_signal(%p) %d %s -> %s %s/%s/%s %s",
@@ -911,7 +909,7 @@ static DBusHandlerResult add_filter(DBusConnection *conn, DBusMessage *message, 
                dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_ERROR ?
                dbus_message_get_error_name(message) : "",
                conn
-               );
+        );
     }
 
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
