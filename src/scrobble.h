@@ -20,7 +20,7 @@ void get_mpris_properties(DBusConnection*, const char*, mpris_properties*);
 struct events* events_new();
 void add_event_ping(struct state*);
 dbus *dbus_connection_init(struct state*);
-void state_loaded_properties(struct state* , mpris_properties*);
+void state_loaded_properties(struct state* , mpris_properties*, const struct mpris_event*);
 
 struct scrobbler {
     CURL *curl;
@@ -135,6 +135,7 @@ static void mpris_player_free(struct mpris_player *player)
     if (NULL != player->properties) { mpris_properties_free(player->properties); }
     if (NULL != player->current) { mpris_properties_free(player->current); }
     if (NULL != player->previous) { mpris_properties_free(player->previous); }
+    if (NULL != player->changed) { free(player->changed); }
 
     free (player);
 }
@@ -176,10 +177,10 @@ static void mpris_player_init(struct mpris_player *player, DBusConnection *conn)
 {
     _trace("mem::initing_player(%p)", player);
     player->queue_length = 0;
-    player->player_state = stopped;
     player->mpris_name = NULL;
     player->current = calloc(1, sizeof(mpris_properties));
     player->previous = calloc(1, sizeof(mpris_properties));
+    player->changed = calloc(1, sizeof(struct mpris_event));
 
     if (NULL != conn) {
         player->properties = mpris_properties_new();
@@ -206,7 +207,7 @@ static void state_init(struct state *s)
     s->dbus = dbus_connection_init(s);
 
     mpris_player_init(s->player, s->dbus->conn);
-    state_loaded_properties(s, s->player->properties);
+    state_loaded_properties(s, s->player->properties, s->player->changed);
 #if 0
     add_event_ping(s);
 #endif
@@ -368,6 +369,7 @@ struct mpris_properties* scrobbles_peek_queue(struct mpris_player *player, size_
     return NULL;
 }
 
+#if 0
 void load_event(mpris_event* e, const struct state *state)
 {
     if (NULL == e) { goto _return; }
@@ -457,6 +459,7 @@ void load_event(mpris_event* e, const struct state *state)
 _return:
     return;
 }
+#endif
 
 void load_scrobble(struct scrobble* d, const mpris_properties *p)
 {

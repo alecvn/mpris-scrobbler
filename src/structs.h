@@ -122,12 +122,12 @@ typedef enum playback_states {
     playing = 1 << 2
 } playback_state;
 
-typedef struct mpris_event {
+struct mpris_event {
     playback_state player_state;
     bool playback_status_changed;
     bool track_changed;
     bool volume_changed;
-} mpris_event;
+};
 
 typedef struct dbus {
     DBusConnection *conn;
@@ -149,7 +149,7 @@ struct mpris_player {
         struct mpris_properties *queue[QUEUE_MAX_LENGTH];
     };
     size_t queue_length;
-    playback_state player_state;
+    struct mpris_event *changed;
 };
 
 struct state {

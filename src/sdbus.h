@@ -813,7 +813,7 @@ static void handle_dispatch_status(DBusConnection *conn, DBusDispatchStatus stat
     }
     if (status == DBUS_DISPATCH_COMPLETE) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "COMPLETE");
-        state_loaded_properties(state, state->player->properties);
+        state_loaded_properties(state, state->player->properties, state->player->changed);
     }
     if (status == DBUS_DISPATCH_NEED_MEMORY) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "OUT_OF_MEMORY");
