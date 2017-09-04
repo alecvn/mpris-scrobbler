@@ -16,7 +16,7 @@
 #define LIBREFM_API_SECRET "c0ffee1511fe"
 
 char *get_player_namespace(DBusConnection *);
-void get_mpris_properties(DBusConnection*, const char*, mpris_properties*);
+void get_mpris_properties(DBusConnection*, const char*, mpris_properties*, struct mpris_event*);
 struct events* events_new();
 void add_event_ping(struct state*);
 dbus *dbus_connection_init(struct state*);
@@ -178,8 +178,6 @@ static void mpris_player_init(struct mpris_player *player, DBusConnection *conn)
     _trace("mem::initing_player(%p)", player);
     player->queue_length = 0;
     player->mpris_name = NULL;
-    player->current = calloc(1, sizeof(mpris_properties));
-    player->previous = calloc(1, sizeof(mpris_properties));
     player->changed = calloc(1, sizeof(struct mpris_event));
 
     if (NULL != conn) {
@@ -187,7 +185,7 @@ static void mpris_player_init(struct mpris_player *player, DBusConnection *conn)
 
         player->mpris_name = get_player_namespace(conn);
         if (NULL != player->mpris_name ) {
-            get_mpris_properties(conn, player->mpris_name, player->properties);
+            get_mpris_properties(conn, player->mpris_name, player->properties, player->changed);
         }
     }
     _trace("mem::inited_player(%p)", player);
@@ -369,97 +367,13 @@ struct mpris_properties* scrobbles_peek_queue(struct mpris_player *player, size_
     return NULL;
 }
 
-#if 0
-void load_event(mpris_event* e, const struct state *state)
+void debug_event(struct mpris_event* e)
 {
-    if (NULL == e) { goto _return; }
-    if (NULL == state) { goto _return; }
-    if (NULL == state->player) { goto _return; }
-
-    const struct mpris_player *player = state->player;
-    if (NULL == player->properties) { goto _return; }
-
-    const mpris_properties *p = player->properties;
-    if (NULL == player->current || player->queue_length == 0) {
-        e->player_state = get_mpris_playback_status(p);
-        e->track_changed = true;
-        e->volume_changed = true;
-        e->playback_status_changed = true;
-
-        return;
-    }
-
-    e->playback_status_changed = (e->player_state != player->player_state);
-
-    if (NULL == p->metadata) { goto _return; }
-    e->player_state = get_mpris_playback_status(p);
-    e->track_changed = false;
-    e->volume_changed = false;
-    e->playback_status_changed = false;
-
-    const mpris_properties *last = player->current;
-    if (NULL == last) { goto _return; }
-    if (NULL == last->metadata) { goto _return; }
-
-    if (last->volume != p->volume) {
-        e->volume_changed = true;
-    }
-    if (
-        (NULL == last->metadata->title) &&
-        (NULL == last->metadata->album) &&
-        (NULL == last->metadata->artist)
-    ) {
-        if (
-            (NULL == p->metadata->title) &&
-            (NULL == p->metadata->album) &&
-            (NULL == p->metadata->artist)
-        ) {
-            e->track_changed = false;
-        } else {
-            e->track_changed = true;
-        }
-    }
-    if (
-        (NULL != p->metadata->title) &&
-        (NULL != last->metadata->title)
-    ) {
-        e->track_changed = strncmp(p->metadata->title, last->metadata->title, strlen(p->metadata->title));
-    }
-    if (
-        (NULL != p->metadata->artist) &&
-        (NULL != last->metadata->artist)
-    ) {
-        e->track_changed = strncmp(p->metadata->artist, last->metadata->artist, strlen(p->metadata->artist));
-    }
-    if (
-        (NULL != p->metadata->album) &&
-        (NULL != last->metadata->album)
-    ) {
-        e->track_changed = (strncmp(p->metadata->album, last->metadata->album, strlen(p->metadata->album)) == 0);
-    }
-    if (last && p) {
-        _debug("scrobbler::checking_volume_changed:\t\t%3s %.2f -> %.2f",
-             e->volume_changed ? "yes" : "no",
-             last->volume, p->volume);
-    } else {
-        _info("scrobbler::checking_volume_changed:\t\t%3s", e->volume_changed ? "yes" : "no");
-    }
-    if (last && p) {
-        _debug("scrobbler::checking_playback_status_changed:\t%3s %s -> %s",
-             e->playback_status_changed ? "yes" : "no", last->playback_status, p->playback_status);
-    } else {
-        _info("scrobbler::checking_playback_status_changed:\t%3s", e->playback_status_changed ? "yes" : "no");
-    }
-    if (last && p) {
-        _debug("scrobbler::checking_track_changed:\t\t%3s %s -> %s",
-            e->track_changed ? "yes" : "no", last->metadata->title, p->metadata->title);
-    } else {
-        _info("scrobbler::checking_track_changed:\t\t%3s", e->track_changed ? "yes" : "no");
-    }
-_return:
-    return;
+    _debug("scrobbler::checking_volume_changed:\t\t%3s", e->volume_changed ? "yes" : "no");
+    _debug("scrobbler::checking_position_changed:\t\t%3s", e->volume_changed ? "yes" : "no");
+    _debug("scrobbler::checking_playback_status_changed:\t%3s", e->playback_status_changed ? "yes" : "no");
+    _debug("scrobbler::checking_track_changed:\t\t%3s", e->track_changed ? "yes" : "no");
 }
-#endif
 
 void load_scrobble(struct scrobble* d, const mpris_properties *p)
 {
@@ -513,7 +427,11 @@ static void lastfm_now_playing(struct scrobbler *s, const struct scrobble *track
     if (NULL == track) { return; }
 
     if (!now_playing_is_valid(track)) {
-        _warn("scrobbler::invalid_now_playing: %s//%s//%s", track->title, track->artist, track->album);
+        _warn("scrobbler::invalid_now_playing(%p): %s//%s//%s",
+            track,
+            (NULL != track->title ? track->title : "(unknown)"),
+            (NULL != track->artist ? track->artist : "(unknown)"),
+            (NULL != track->album ? track->album : "(unknown)"));
         return;
     }
 
@@ -523,7 +441,7 @@ static void lastfm_now_playing(struct scrobbler *s, const struct scrobble *track
 
     for (size_t i = 0; i < s->credentials_length; i++) {
         struct api_credentials *cur = s->credentials[i];
-        if (NULL == cur) { return; }
+        if (NULL == cur) { continue; }
         _trace("api::submit_to[%s]", get_api_type_label(cur->end_point));
         if (s->credentials[i]->enabled) {
             struct http_request *req = api_build_request_now_playing(track, s->curl, cur->end_point);

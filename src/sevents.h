@@ -176,16 +176,14 @@ static bool mpris_event_happened(const struct mpris_event *what_happened)
     return (
         what_happened->playback_status_changed ||
         what_happened->volume_changed ||
+        what_happened->position_changed ||
         what_happened->track_changed
     );
 }
 
+struct scrobble* scrobble_new();
 void state_loaded_properties(struct state *state, mpris_properties *properties, const struct mpris_event *what_happened)
 {
-#if 0
-    load_event(&what_happened, state);
-#endif
-
     if (!mpris_event_happened(what_happened)) { return; }
 
     struct scrobble *scrobble = scrobble_new();
@@ -216,6 +214,9 @@ void state_loaded_properties(struct state *state, mpris_properties *properties, 
     }
     if (what_happened->volume_changed) {
         // trigger volume_changed event
+    }
+    if (what_happened->position_changed) {
+        // trigger position_changed event
     }
     scrobble_free(scrobble);
 }

@@ -127,6 +127,7 @@ struct mpris_event {
     bool playback_status_changed;
     bool track_changed;
     bool volume_changed;
+    bool position_changed;
 };
 
 typedef struct dbus {
