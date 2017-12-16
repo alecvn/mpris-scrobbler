@@ -106,8 +106,11 @@ static void remove_events_now_playing(struct state *state, size_t count)
 
     _trace("events::remove_events(%u:%p):now_playing", count, state->events->now_playing);
     state->events->now_playing_count -= now_playing_events_free(state->events->now_playing, state->events->now_playing_count, count);
-    if (count == state->events->now_playing_count && NULL != state->player->current) {
-        mpris_properties_free(state->player->current);
+    for (size_t i = 0; i < state->player_count; i++) {
+        struct mpris_player *player = state->players[i];
+        if (count == state->events->now_playing_count && NULL != player->current) {
+            mpris_properties_free(player->current);
+        }
     }
 }
 
@@ -122,15 +125,18 @@ static void send_now_playing(evutil_socket_t fd, short event, void *data)
     struct state *state = data;
     if (fd) { fd = 0; }
     if (event) { event = 0; }
-    if (NULL == state->player->current) {
-        _warn("events::triggered::now_playing: missing current track");
-        return;
+    for (size_t i = 0; i < state->player_count; i++) {
+        struct mpris_player *player = state->players[i];
+        if (NULL == player->current) {
+            _warn("events::triggered::now_playing: missing current track");
+            return;
+        }
+        struct scrobble *current = scrobble_new();
+        load_scrobble(current, player->current);
+        _trace("events::triggered(%p:%p)[%u]:now_playing", state->events->now_playing[state->events->now_playing_count - 1], current, state->events->now_playing_count - 1);
+        scrobbler_now_playing(state->scrobbler, current);
+        scrobble_free(current);
     }
-    struct scrobble *current = scrobble_new();
-    load_scrobble(current, state->player->current);
-    _trace("events::triggered(%p:%p)[%u]:now_playing", state->events->now_playing[state->events->now_playing_count - 1], current, state->events->now_playing_count - 1);
-    scrobbler_now_playing(state->scrobbler, current);
-    scrobble_free(current);
 }
 
 static void add_event_now_playing(struct state *state)
@@ -138,24 +144,27 @@ static void add_event_now_playing(struct state *state)
     struct events *ev = state->events;
     if (NULL != ev->now_playing[0]) { remove_events_now_playing(state, 0); }
 
-    struct mpris_properties *current = state->player->current;
-    // @TODO: take into consideration the current position
-    unsigned current_position = current->position / 1000000;
-    unsigned length = current->metadata->length / 1000000;
-    ev->now_playing_count = (length - current_position) / NOW_PLAYING_DELAY;
+    for (size_t i = 0; i < state->player_count; i++) {
+        struct mpris_player *player = state->players[i];
+        struct mpris_properties *current = player->current;
+        // @TODO: take into consideration the current position
+        unsigned current_position = current->position / 1000000;
+        unsigned length = current->metadata->length / 1000000;
+        ev->now_playing_count = (length - current_position) / NOW_PLAYING_DELAY;
 
-    _trace("events::add_event(%p):now_playing: track_lenth: %u(s), event_count: %u", ev->now_playing, length, ev->now_playing_count);
-    for (size_t i = 0; i < ev->now_playing_count; i++) {
-        struct timeval now_playing_tv = {
-            .tv_sec = NOW_PLAYING_DELAY * (ev->now_playing_count - i - 1),
-            .tv_usec = 0
-        };
+        _trace("events::add_event(%p):now_playing: track_lenth: %u(s), event_count: %u", ev->now_playing, length, ev->now_playing_count);
+        for (size_t i = 0; i < ev->now_playing_count; i++) {
+            struct timeval now_playing_tv = {
+                .tv_sec = NOW_PLAYING_DELAY * (ev->now_playing_count - i - 1),
+                .tv_usec = 0
+            };
 
-        ev->now_playing[i] = calloc(1, sizeof(struct event));
-        // Initalize timed event for now_playing
-        if ( event_assign(ev->now_playing[i], ev->base, -1, EV_PERSIST, send_now_playing, state) == 0) {
-            _trace("events::add_event(%p//%p)[%u]:now_playing in %2.3f seconds", ev->now_playing[i], state->player->current, i, (double)(now_playing_tv.tv_sec + now_playing_tv.tv_usec));
-            event_add(ev->now_playing[i], &now_playing_tv);
+            ev->now_playing[i] = calloc(1, sizeof(struct event));
+            // Initalize timed event for now_playing
+            if ( event_assign(ev->now_playing[i], ev->base, -1, EV_PERSIST, send_now_playing, state) == 0) {
+                _trace("events::add_event(%p//%p)[%u]:now_playing in %2.3f seconds", ev->now_playing[i], player->current, i, (double)(now_playing_tv.tv_sec + now_playing_tv.tv_usec));
+                event_add(ev->now_playing[i], &now_playing_tv);
+            }
         }
     }
 }
@@ -180,7 +189,10 @@ static void send_scrobble(evutil_socket_t fd, short event, void *data)
     if (event) { event = 0; }
 
     _trace("events::triggered(%p):scrobble", state->events->scrobble);
-    scrobbles_consume_queue(state->scrobbler, state->player);
+    for (size_t i = 0; i < state->player_count; i++) {
+        struct mpris_player *player = state->players[i];
+        scrobbles_consume_queue(state->scrobbler, player);
+    }
 }
 
 static void add_event_scrobble(struct state *state)
@@ -188,9 +200,13 @@ static void add_event_scrobble(struct state *state)
     struct timeval scrobble_tv = {.tv_sec = 0, .tv_usec = 0};
     struct events *ev = state->events;
 
-    if (NULL == state->player) { return; }
-    if (NULL == state->player->current) { return; }
-    if (NULL == state->player->current->metadata) { return; }
+    for (size_t i = 0; i < state->player_count; i++) {
+        struct mpris_player *player = state->players[i];
+
+        if (NULL == player) { return; }
+        if (NULL == player->current) { return; }
+        if (NULL == player->current->metadata) { return; }
+    }
     if (NULL != ev->scrobble) { remove_event_scrobble(state); }
 
     ev->scrobble = calloc(1, sizeof(struct event));
@@ -199,7 +215,10 @@ static void add_event_scrobble(struct state *state)
     // Initalize timed event for scrobbling
     event_assign(ev->scrobble, ev->base, -1, EV_PERSIST, send_scrobble, state);
 
-    scrobble_tv.tv_sec = state->player->current->metadata->length / 2000000;
+    for (size_t i = 0; i < state->player_count; i++) {
+        struct mpris_player *player = state->players[i];
+        scrobble_tv.tv_sec = player->current->metadata->length / 2000000;
+    }
     _trace("events::add_event(%p):scrobble in %2.3f seconds", ev->scrobble, (double)scrobble_tv.tv_sec);
     event_add(ev->scrobble, &scrobble_tv);
 }
@@ -233,41 +252,44 @@ void state_loaded_properties(struct state *state, struct mpris_properties *prope
     load_scrobble(scrobble, properties);
 
     bool scrobble_added = false;
-    //mpris_properties_copy(state->properties, properties);
-    if(what_happened->playback_status_changed) {
-        if (NULL != state->events->now_playing[0]) { remove_events_now_playing(state, 0); }
-        if (NULL != state->events->scrobble) { remove_event_scrobble(state); }
-        if (what_happened->player_state == playing) {
-            if (now_playing_is_valid(scrobble)) {
-                scrobbles_append(state->player, properties);
-                add_event_now_playing(state);
-                scrobble_added = true;
+    for (size_t i = 0; i < state->player_count; i++) {
+        struct mpris_player *player = state->players[i];
+        //mpris_properties_copy(state->properties, properties);
+        if(what_happened->playback_status_changed) {
+            if (NULL != state->events->now_playing[0]) { remove_events_now_playing(state, 0); }
+            if (NULL != state->events->scrobble) { remove_event_scrobble(state); }
+            if (what_happened->player_state == playing) {
+                if (now_playing_is_valid(scrobble)) {
+                    scrobbles_append(player, properties);
+                    add_event_now_playing(state);
+                    scrobble_added = true;
+                }
             }
         }
-    }
-    if(what_happened->track_changed) {
-        // TODO: maybe add a queue flush event
+        if(what_happened->track_changed) {
+            // TODO: maybe add a queue flush event
 #if 1
-        if (NULL != state->events->now_playing[0]) { remove_events_now_playing(state, 0); }
-        if (NULL != state->events->scrobble) { remove_event_scrobble(state); }
+            if (NULL != state->events->now_playing[0]) { remove_events_now_playing(state, 0); }
+            if (NULL != state->events->scrobble) { remove_event_scrobble(state); }
 #endif
 
-        if(what_happened->player_state == playing && now_playing_is_valid(scrobble)) {
-            if (!scrobble_added) {
-                scrobbles_append(state->player, properties);
+            if(what_happened->player_state == playing && now_playing_is_valid(scrobble)) {
+                if (!scrobble_added) {
+                    scrobbles_append(player, properties);
+                }
+                add_event_now_playing(state);
+                add_event_scrobble(state);
             }
-            add_event_now_playing(state);
-            add_event_scrobble(state);
         }
+        if (what_happened->volume_changed) {
+            // trigger volume_changed event
+        }
+        if (what_happened->position_changed) {
+            // trigger position event
+        }
+        scrobble_free(scrobble);
+        mpris_event_clear(player->changed);
     }
-    if (what_happened->volume_changed) {
-        // trigger volume_changed event
-    }
-    if (what_happened->position_changed) {
-        // trigger position event
-    }
-    scrobble_free(scrobble);
-    mpris_event_clear(state->player->changed);
 }
 
 #if 0
@@ -282,6 +304,7 @@ static void remove_event_ping(struct state *state)
 }
 #endif
 
+size_t get_players_namespaces(DBusConnection*, char**);
 static void ping(evutil_socket_t fd, short event, void *data)
 {
     if (fd) { fd = 0; }
@@ -290,22 +313,31 @@ static void ping(evutil_socket_t fd, short event, void *data)
 
     struct state *state = data;
     bool have_player = false;
-    if (NULL == state->player->mpris_name) {
-        return;
-    }
-    if (strlen(state->player->mpris_name) == 0) {
-        // try to get players in mpris
-        state->player->mpris_name = get_player_namespace(state->dbus->conn);
-    }
+    char *namespaces[MAX_PLAYERS];
 
-    // we already have a player, we check it's still there
-    have_player = ping_player(state->dbus->conn, state->player->mpris_name);
+    size_t player_count = get_players_namespaces(state->dbus->conn, namespaces);
+    for (size_t i = 0; i < player_count; i++) {
+        struct mpris_player *player = state->players[i];
 
-    if (!have_player) {
-        _warn("events::triggered(%p):ping_failed: %s", state->events->ping, state->player->mpris_name);
-        zero_string(&(state->player->mpris_name), MAX_PROPERTY_LENGTH);
-    } else {
-        _debug("events::triggered(%p):ping_ok: %s", state->events->ping, state->player->mpris_name);
+        if (NULL == player->mpris_name) {
+            return;
+        }
+            // try to get players in mpris
+        if (strlen(player->mpris_name) == 0) {
+            // no other player on the bus
+            _warn("events::triggered(%p):ping_failed: no players on bus", state->events->ping);
+            return;
+        }
+
+        // we already have a player, we check it's still there
+        have_player = ping_player(state->dbus->conn, player->mpris_name);
+
+        if (!have_player) {
+            _warn("events::triggered(%p):ping_failed: %s", state->events->ping, player->mpris_name);
+            zero_string(&(player->mpris_name), MAX_PROPERTY_LENGTH);
+        } else {
+            _debug("events::triggered(%p):ping_ok: %s", state->events->ping, player->mpris_name);
+        }
     }
 }
 

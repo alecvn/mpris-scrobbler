@@ -40,6 +40,8 @@
 
 #define MAX_API_COUNT                   3
 
+#define MAX_PLAYERS                     5
+
 #define MAX_NOW_PLAYING_EVENTS          20
 
 enum api_type {
@@ -175,8 +177,9 @@ struct mpris_player {
 struct state {
     struct scrobbler *scrobbler;
     struct dbus *dbus;
-    struct mpris_player *player;
     struct events *events;
+    size_t player_count;
+    struct mpris_player *players[MAX_PLAYERS];
 
 };
 

@@ -9,7 +9,6 @@
 #define NOW_PLAYING_DELAY 65 //seconds
 #define MIN_TRACK_LENGTH  30 // seconds
 
-char *get_player_namespace(DBusConnection *);
 void get_mpris_properties(DBusConnection*, const char*, struct mpris_properties*, struct mpris_event*);
 
 struct dbus *dbus_connection_init(struct state*);
@@ -152,7 +151,9 @@ void state_free(struct state *s)
 {
     if (NULL != s->dbus) { dbus_close(s); }
     if (NULL != s->events) { events_free(s->events); }
-    if (NULL != s->player) { mpris_player_free(s->player); }
+    for (size_t i = 0; i < s->player_count; i++) {
+        if (NULL != s->players[i]) { mpris_player_free(s->players[i]); }
+    }
     if (NULL != s->scrobbler) { scrobbler_free(s->scrobbler); }
 
     free(s);
@@ -178,23 +179,49 @@ static struct mpris_player *mpris_player_new(void)
     return (result);
 }
 
-static void mpris_player_init(struct mpris_player *player, DBusConnection *conn)
+static void mpris_player_init(struct mpris_player *player, const char* player_namespace, DBusConnection *conn)
 {
-    _trace("mem::initing_player(%p)", player);
+    if (NULL == player) { return; }
+    if (NULL == conn) { return; }
+    if (NULL == player_namespace) { return; }
+
+    _trace("mem::initing_player(%p): %s", player, player_namespace);
+
     player->queue_length = 0;
-    player->mpris_name = NULL;
     player->changed = calloc(1, sizeof(struct mpris_event));
+    player->properties = mpris_properties_new();
+    player->current = mpris_properties_new();
 
-    if (NULL != conn) {
-        player->properties = mpris_properties_new();
-        player->current = mpris_properties_new();
+    strncpy(player->mpris_name, player_namespace, strlen(player_namespace));
 
-        player->mpris_name = get_player_namespace(conn);
-        if (NULL != player->mpris_name) {
-            get_mpris_properties(conn, player->mpris_name, player->properties, player->changed);
-        }
+    if (NULL != player->mpris_name) {
+        get_mpris_properties(conn, player->mpris_name, player->properties, player->changed);
     }
     _trace("mem::inited_player(%p)", player);
+}
+
+static bool mpris_player_valid (struct mpris_player *player)
+{
+    return (NULL != player && NULL != player->mpris_name);
+}
+
+size_t get_players_namespaces(DBusConnection*, char*[]);
+static void mpris_players_init(struct state *s)
+{
+    struct mpris_player *player = mpris_player_new();
+    char *namespaces[MAX_PLAYERS];
+    size_t player_count = get_players_namespaces(s->dbus->conn, namespaces);
+
+    if (NULL == player) { return; }
+    for (size_t i = 0; i < player_count; i++) {
+        char *player_namespace =  namespaces[i];
+        mpris_player_init(player, player_namespace, s->dbus->conn);
+
+        if (mpris_player_valid(player)) {
+            s->players[i] = player;
+            s->player_count++;
+        }
+    }
 }
 
 void add_event_ping(struct state*);
@@ -204,7 +231,7 @@ bool state_init(struct state *s, struct sighandler_payload *sig_data)
 {
     _trace("mem::initing_state(%p)", s);
     s->scrobbler = scrobbler_new();
-    s->player = mpris_player_new();
+    s->player_count = 0;
 
     scrobbler_init(s->scrobbler, sig_data->config);
 
@@ -213,9 +240,13 @@ bool state_init(struct state *s, struct sighandler_payload *sig_data)
     s->dbus = dbus_connection_init(s);
 
     if (NULL == s->dbus) { return false; }
-    mpris_player_init(s->player, s->dbus->conn);
-    state_loaded_properties(s, s->player->properties, s->player->changed);
+    mpris_players_init(s);
+    for (size_t i = 0; i < s->player_count; i++) {
+        struct mpris_player *player = s->players[i];
+        state_loaded_properties(s, player->properties, player->changed);
+    }
 
+    // todo: this needs to be moved to be used per player
     add_event_ping(s);
 
     _trace("mem::inited_state(%p)", s);

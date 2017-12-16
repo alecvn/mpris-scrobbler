@@ -483,23 +483,23 @@ _unref_message_err:
     return available;
 }
 
-char *get_player_namespace(DBusConnection *conn)
+size_t get_players_namespaces(DBusConnection *conn, char *namespaces[])
 {
-    if (NULL == conn) { return false; }
+    if (NULL == conn) { return 0; }
+    size_t player_count = 0;
 
     const char *method = DBUS_METHOD_LIST_NAMES;
     const char *destination = DBUS_BUS_INTERFACE;
     const char *path = DBUS_PATH;
     const char *interface = DBUS_INTERFACE;
     const char *mpris_namespace = MPRIS_PLAYER_NAMESPACE;
-    char *player_namespace = NULL;
 
     DBusMessage *msg;
     DBusPendingCall *pending;
 
     // create a new method call and check for errors
     msg = dbus_message_new_method_call(destination, path, interface, method);
-    if (NULL == msg) { return player_namespace; }
+    if (NULL == msg) { return player_count; }
 
     // send message and get a handle for a reply
     if (!dbus_connection_send_with_reply (conn, msg, &pending, DBUS_CONNECTION_TIMEOUT)) {
@@ -530,9 +530,9 @@ char *get_player_namespace(DBusConnection *conn)
                 dbus_message_iter_get_basic(&arrayElementIter, &value);
                 if (strncmp(value, mpris_namespace, strlen(mpris_namespace)) == 0) {
                     size_t len = strlen(value);
-                    player_namespace = get_zero_string(len);
-                    strncpy(player_namespace, value, len);
-                    break;
+                    //player_namespace = get_zero_string(len);
+                    strncpy(namespaces[player_count], value, len);
+                    player_count++;
                 }
             }
             dbus_message_iter_next(&arrayElementIter);
@@ -543,7 +543,7 @@ char *get_player_namespace(DBusConnection *conn)
     dbus_pending_call_unref(pending);
     // free message
     dbus_message_unref(msg);
-    return player_namespace;
+    return player_count;
 
 _unref_pending_err:
     {
@@ -553,7 +553,7 @@ _unref_message_err:
     {
         dbus_message_unref(msg);
     }
-    return NULL;
+    return player_count;
 }
 
 static void load_properties(DBusMessageIter *rootIter, struct mpris_properties *properties, struct mpris_event *changes)
@@ -814,7 +814,10 @@ static void handle_dispatch_status(DBusConnection *conn, DBusDispatchStatus stat
     if (status == DBUS_DISPATCH_COMPLETE) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "COMPLETE");
 
-        state_loaded_properties(state, state->player->properties, state->player->changed);
+        for (size_t i = 0; i < state->player_count; i++) {
+            struct mpris_player *player = state->players[i];
+            state_loaded_properties(state, player->properties, player->changed);
+        }
     }
     if (status == DBUS_DISPATCH_NEED_MEMORY) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "OUT_OF_MEMORY");
@@ -906,8 +909,11 @@ static DBusHandlerResult add_filter(DBusConnection *conn, DBusMessage *message, 
                dbus_message_get_error_name(message) : "",
                conn
         );
-        DBusHandlerResult result = load_properties_from_message(message, state->player->properties, state->player->changed);
-        return result;
+        for (size_t i = 0; i < state->player_count; i++) {
+            struct mpris_player *player = state->players[i];
+            DBusHandlerResult result = load_properties_from_message(message, player->properties, player->changed);
+            return result;
+        }
     } else {
         _trace("dbus::filter:unknown_signal(%p) %d %s -> %s %s/%s/%s %s",
                message,
