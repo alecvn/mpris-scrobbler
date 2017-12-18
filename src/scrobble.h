@@ -152,7 +152,9 @@ void state_free(struct state *s)
     if (NULL != s->dbus) { dbus_close(s); }
     if (NULL != s->events) { events_free(s->events); }
     for (size_t i = 0; i < s->player_count; i++) {
-        if (NULL != s->players[i]) { mpris_player_free(s->players[i]); }
+        if (NULL != s->players[i]) {
+            mpris_player_free(s->players[i]);
+        }
     }
     if (NULL != s->scrobbler) { scrobbler_free(s->scrobbler); }
 
@@ -215,6 +217,7 @@ static void mpris_players_init(struct state *s)
     if (NULL == player) { return; }
     for (size_t i = 0; i < player_count; i++) {
         char *player_namespace =  namespaces[i];
+        _trace("mpris::checking_namespace[%lu]: %s", player_namespace);
         mpris_player_init(player, player_namespace, s->dbus->conn);
 
         if (mpris_player_valid(player)) {
@@ -222,6 +225,7 @@ static void mpris_players_init(struct state *s)
             s->player_count++;
         }
     }
+    _trace("mpris::found: %lu players", s->player_count);
 }
 
 void add_event_ping(struct state*);

@@ -483,7 +483,7 @@ _unref_message_err:
     return available;
 }
 
-size_t get_players_namespaces(DBusConnection *conn, char *namespaces[])
+size_t get_players_namespaces(DBusConnection *conn, char **namespaces)
 {
     if (NULL == conn) { return 0; }
     size_t player_count = 0;
@@ -531,7 +531,9 @@ size_t get_players_namespaces(DBusConnection *conn, char *namespaces[])
                 if (strncmp(value, mpris_namespace, strlen(mpris_namespace)) == 0) {
                     size_t len = strlen(value);
                     //player_namespace = get_zero_string(len);
-                    strncpy(namespaces[player_count], value, len);
+                    _trace("copying value to %p %p", namespaces, namespaces[player_count]);
+                    if (NULL == (*namespaces + player_count)) { break; }
+                    strncpy((*namespaces)+player_count, value, len);
                     player_count++;
                 }
             }
