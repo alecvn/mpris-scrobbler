@@ -194,6 +194,7 @@ static void mpris_player_init(struct mpris_player *player, const char* player_na
     player->properties = mpris_properties_new();
     player->current = mpris_properties_new();
 
+    player->mpris_name = get_zero_string(strlen(player_namespace));
     strncpy(player->mpris_name, player_namespace, strlen(player_namespace));
 
     if (NULL != player->mpris_name) {
@@ -210,14 +211,14 @@ static bool mpris_player_valid (struct mpris_player *player)
 size_t get_players_namespaces(DBusConnection*, char*[]);
 static void mpris_players_init(struct state *s)
 {
-    struct mpris_player *player = mpris_player_new();
-    char *namespaces[MAX_PLAYERS];
-    size_t player_count = get_players_namespaces(s->dbus->conn, namespaces);
+    char *namespaces = calloc(MAX_PLAYERS, sizeof(char) * MAX_PROPERTY_LENGTH);
+    size_t player_count = get_players_namespaces(s->dbus->conn, &namespaces);
 
-    if (NULL == player) { return; }
     for (size_t i = 0; i < player_count; i++) {
-        char *player_namespace =  namespaces[i];
-        _trace("mpris::checking_namespace[%lu]: %s", player_namespace);
+        char *player_namespace =  namespaces + i * MAX_PROPERTY_LENGTH;
+        _trace("mpris::checking_namespace[%lu:%lu]: %s", i, player_count, player_namespace);
+        struct mpris_player *player = mpris_player_new();
+        if (NULL == player) { return; }
         mpris_player_init(player, player_namespace, s->dbus->conn);
 
         if (mpris_player_valid(player)) {
