@@ -12,7 +12,7 @@
 void get_mpris_properties(DBusConnection*, const char*, struct mpris_properties*, struct mpris_event*);
 
 struct dbus *dbus_connection_init(struct state*);
-void state_loaded_properties(struct state*, struct mpris_properties*, const struct mpris_event*);
+void state_loaded_properties(struct mpris_player*, struct mpris_properties*, const struct mpris_event*);
 
 struct scrobbler {
     struct api_credentials **credentials;
@@ -181,11 +181,23 @@ static struct mpris_player *mpris_player_new(void)
     return (result);
 }
 
-static void mpris_player_init(struct mpris_player *player, const char* player_namespace, DBusConnection *conn)
+static void mpris_player_events_init(struct player_events *ev, struct event_base *base)
+{
+    ev->base = base;
+
+    ev->dispatch = NULL;
+    ev->scrobble = NULL;
+    ev->ping = NULL;
+    ev->now_playing_count = 0;
+    ev->now_playing[0] = NULL;
+}
+
+static void mpris_player_init(struct mpris_player *player, const char* player_namespace, struct dbus *dbus, struct event_base *base)
 {
     if (NULL == player) { return; }
-    if (NULL == conn) { return; }
+    if (NULL == dbus) { return; }
     if (NULL == player_namespace) { return; }
+    if (NULL == base) { return; }
 
     _trace("mem::initing_player(%p): %s", player, player_namespace);
 
@@ -193,12 +205,13 @@ static void mpris_player_init(struct mpris_player *player, const char* player_na
     player->changed = calloc(1, sizeof(struct mpris_event));
     player->properties = mpris_properties_new();
     player->current = mpris_properties_new();
+    mpris_player_events_init(player->events, base);
 
     player->mpris_name = get_zero_string(strlen(player_namespace));
     strncpy(player->mpris_name, player_namespace, strlen(player_namespace));
 
     if (NULL != player->mpris_name) {
-        get_mpris_properties(conn, player->mpris_name, player->properties, player->changed);
+        get_mpris_properties(dbus->conn, player->mpris_name, player->properties, player->changed);
     }
     _trace("mem::inited_player(%p)", player);
 }
@@ -219,7 +232,7 @@ static void mpris_players_init(struct state *s)
         _trace("mpris::checking_namespace[%lu:%lu]: %s", i, player_count, player_namespace);
         struct mpris_player *player = mpris_player_new();
         if (NULL == player) { return; }
-        mpris_player_init(player, player_namespace, s->dbus->conn);
+        mpris_player_init(player, player_namespace, s->dbus, s->events->base);
 
         if (mpris_player_valid(player)) {
             s->players[i] = player;
@@ -248,7 +261,7 @@ bool state_init(struct state *s, struct sighandler_payload *sig_data)
     mpris_players_init(s);
     for (size_t i = 0; i < s->player_count; i++) {
         struct mpris_player *player = s->players[i];
-        state_loaded_properties(s, player->properties, player->changed);
+        state_loaded_properties(player, player->properties, player->changed);
     }
 
     // todo: this needs to be moved to be used per player

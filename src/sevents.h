@@ -32,6 +32,7 @@ size_t now_playing_events_free(struct event *events[], size_t events_count, size
 
 void events_free(struct events *ev)
 {
+#if 0
     if (NULL != ev->dispatch) {
         _trace("mem::freeing_event(%p):dispatch", ev->dispatch);
         event_free(ev->dispatch);
@@ -45,6 +46,7 @@ void events_free(struct events *ev)
         _trace("mem::freeing_event(%p):ping", ev->ping);
         event_free(ev->ping);
     }
+#endif
     _trace("mem::freeing_event(%p):SIGINT", ev->sigint);
     event_free(ev->sigint);
     _trace("mem::freeing_event(%p):SIGTERM", ev->sigterm);
@@ -71,11 +73,6 @@ void events_init(struct events *ev, struct sighandler_payload *p)
         _trace("mem::inited_libevent(%p)", ev->base);
     }
     p->event_base = ev->base;
-    ev->dispatch = NULL;
-    ev->scrobble = NULL;
-    ev->ping = NULL;
-    ev->now_playing_count = 0;
-    ev->now_playing[0] = NULL;
 
     ev->sigint = evsignal_new(ev->base, SIGINT, sighandler, p);
     if (NULL == ev->sigint || event_add(ev->sigint, NULL) < 0) {
@@ -94,23 +91,20 @@ void events_init(struct events *ev, struct sighandler_payload *p)
     }
 }
 
-static void remove_events_now_playing(struct state *state, size_t count)
+static void remove_events_now_playing(struct mpris_player *player, size_t count)
 {
-    if (NULL == state) { return; }
-    if (NULL == state->events) { return; }
-    if (state->events->now_playing_count == 0) { return; }
+    if (NULL == player) { return; }
+    if (NULL == player->events) { return; }
+    if (player->events->now_playing_count == 0) { return; }
     if (count == 0) {
-        count = state->events->now_playing_count;
+        count = player->events->now_playing_count;
     }
     if (count == 0) { return; }
 
-    _trace("events::remove_events(%u:%p):now_playing", count, state->events->now_playing);
-    state->events->now_playing_count -= now_playing_events_free(state->events->now_playing, state->events->now_playing_count, count);
-    for (size_t i = 0; i < state->player_count; i++) {
-        struct mpris_player *player = state->players[i];
-        if (count == state->events->now_playing_count && NULL != player->current) {
-            mpris_properties_free(player->current);
-        }
+    _trace("events::remove_events(%u:%p):now_playing", count, player->events->now_playing);
+    player->events->now_playing_count -= now_playing_events_free(player->events->now_playing, player->events->now_playing_count, count);
+    if (count == player->events->now_playing_count && NULL != player->current) {
+        mpris_properties_free(player->current);
     }
 }
 
@@ -122,21 +116,18 @@ static void send_now_playing(evutil_socket_t fd, short event, void *data)
         return;
     }
 
-    struct state *state = data;
+    struct mpris_player *player = data;
     if (fd) { fd = 0; }
     if (event) { event = 0; }
-    for (size_t i = 0; i < state->player_count; i++) {
-        struct mpris_player *player = state->players[i];
-        if (NULL == player->current) {
-            _warn("events::triggered::now_playing: missing current track");
-            return;
-        }
-        struct scrobble *current = scrobble_new();
-        load_scrobble(current, player->current);
-        _trace("events::triggered(%p:%p)[%u]:now_playing", state->events->now_playing[state->events->now_playing_count - 1], current, state->events->now_playing_count - 1);
-        scrobbler_now_playing(state->scrobbler, current);
-        scrobble_free(current);
+    if (NULL == player->current) {
+        _warn("events::triggered::now_playing: missing current track");
+        return;
     }
+    struct scrobble *current = scrobble_new();
+    load_scrobble(current, player->current);
+    _trace("events::triggered(%p:%p)[%u]:now_playing", player->events->now_playing[player->events->now_playing_count - 1], current, player->events->now_playing_count - 1);
+    scrobbler_now_playing(state->scrobbler, current);
+    scrobble_free(current);
 }
 
 static void add_event_now_playing(struct state *state)
@@ -241,7 +232,7 @@ static inline bool mpris_event_happened(const struct mpris_event *what_happened)
     );
 }
 
-void state_loaded_properties(struct state *state, struct mpris_properties *properties, const struct mpris_event *what_happened)
+void state_loaded_properties(struct mpris_player *player, struct mpris_properties *properties, const struct mpris_event *what_happened)
 {
     if (!mpris_event_happened(what_happened)) {
         _debug("events::loaded_properties: nothing happened");
@@ -252,44 +243,41 @@ void state_loaded_properties(struct state *state, struct mpris_properties *prope
     load_scrobble(scrobble, properties);
 
     bool scrobble_added = false;
-    for (size_t i = 0; i < state->player_count; i++) {
-        struct mpris_player *player = state->players[i];
-        //mpris_properties_copy(state->properties, properties);
-        if(what_happened->playback_status_changed) {
-            if (NULL != state->events->now_playing[0]) { remove_events_now_playing(state, 0); }
-            if (NULL != state->events->scrobble) { remove_event_scrobble(state); }
-            if (what_happened->player_state == playing) {
-                if (now_playing_is_valid(scrobble)) {
-                    scrobbles_append(player, properties);
-                    add_event_now_playing(state);
-                    scrobble_added = true;
-                }
+    //mpris_properties_copy(state->properties, properties);
+    if(what_happened->playback_status_changed) {
+        if (NULL != player->events->now_playing[0]) { remove_events_now_playing(player, 0); }
+        if (NULL != player->events->scrobble) { remove_event_scrobble(player); }
+        if (what_happened->player_state == playing) {
+            if (now_playing_is_valid(scrobble)) {
+                scrobbles_append(player, properties);
+                add_event_now_playing(player);
+                scrobble_added = true;
             }
         }
-        if(what_happened->track_changed) {
-            // TODO: maybe add a queue flush event
+    }
+    if(what_happened->track_changed) {
+        // TODO: maybe add a queue flush event
 #if 1
-            if (NULL != state->events->now_playing[0]) { remove_events_now_playing(state, 0); }
-            if (NULL != state->events->scrobble) { remove_event_scrobble(state); }
+        if (NULL != player->events->now_playing[0]) { remove_events_now_playing(player, 0); }
+        if (NULL != player->events->scrobble) { remove_event_scrobble(player); }
 #endif
 
-            if(what_happened->player_state == playing && now_playing_is_valid(scrobble)) {
-                if (!scrobble_added) {
-                    scrobbles_append(player, properties);
-                }
-                add_event_now_playing(state);
-                add_event_scrobble(state);
+        if(what_happened->player_state == playing && now_playing_is_valid(scrobble)) {
+            if (!scrobble_added) {
+                scrobbles_append(player, properties);
             }
+            add_event_now_playing(player);
+            add_event_scrobble(player);
         }
-        if (what_happened->volume_changed) {
-            // trigger volume_changed event
-        }
-        if (what_happened->position_changed) {
-            // trigger position event
-        }
-        scrobble_free(scrobble);
-        mpris_event_clear(player->changed);
     }
+    if (what_happened->volume_changed) {
+        // trigger volume_changed event
+    }
+    if (what_happened->position_changed) {
+        // trigger position event
+    }
+    scrobble_free(scrobble);
+    mpris_event_clear(player->changed);
 }
 
 #if 0
@@ -304,7 +292,6 @@ static void remove_event_ping(struct state *state)
 }
 #endif
 
-size_t get_players_namespaces(DBusConnection*, char**);
 static void ping(evutil_socket_t fd, short event, void *data)
 {
     if (fd) { fd = 0; }
@@ -313,10 +300,8 @@ static void ping(evutil_socket_t fd, short event, void *data)
 
     struct state *state = data;
     bool have_player = false;
-    char *namespaces[MAX_PLAYERS];
 
-    size_t player_count = get_players_namespaces(state->dbus->conn, namespaces);
-    for (size_t i = 0; i < player_count; i++) {
+    for (size_t i = 0; i < state->player_count; i++) {
         struct mpris_player *player = state->players[i];
 
         if (NULL == player->mpris_name) {
@@ -334,10 +319,10 @@ static void ping(evutil_socket_t fd, short event, void *data)
 
         if (!have_player) {
             _warn("events::triggered(%p):ping_failed: %s", state->events->ping, player->mpris_name);
-            zero_string(&(player->mpris_name), MAX_PROPERTY_LENGTH);
         } else {
             _debug("events::triggered(%p):ping_ok: %s", state->events->ping, player->mpris_name);
         }
+        mpris_player_free(player);
     }
 }
 

@@ -117,16 +117,20 @@ struct mpris_properties {
     bool shuffle;
 };
 
-struct events {
+struct player_events {
     struct event_base *base;
-    struct event *sigint;
-    struct event *sigterm;
-    struct event *sighup;
     struct event *dispatch;
     struct event *scrobble;
     struct event *ping;
     size_t now_playing_count;
     struct event *now_playing[MAX_NOW_PLAYING_EVENTS];
+};
+
+struct events {
+    struct event_base *base;
+    struct event *sigint;
+    struct event *sigterm;
+    struct event *sighup;
 };
 
 struct scrobble {
@@ -167,11 +171,13 @@ struct dbus {
 
 struct mpris_player {
     char *mpris_name;
+    struct dbus *dbus;
     struct mpris_properties *properties;
     struct mpris_properties *current;
     struct mpris_properties *queue[QUEUE_MAX_LENGTH];
     size_t queue_length;
     struct mpris_event *changed;
+    struct player_events *events;
 };
 
 struct state {

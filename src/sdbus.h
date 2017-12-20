@@ -530,16 +530,16 @@ size_t get_players_namespaces(DBusConnection *conn, char **namespaces)
                 dbus_message_iter_get_basic(&arrayElementIter, &value);
                 if (strncmp(value, mpris_namespace, strlen(mpris_namespace)) == 0) {
                     size_t len = strlen(value);
-                    //player_namespace = get_zero_string(len);
-                    _trace("copying value to %p %p", namespaces, namespaces[player_count]);
-                    if (NULL == (*namespaces + player_count)) { break; }
-                    strncpy((*namespaces)+player_count, value, len);
+                    size_t offset = player_count * MAX_PROPERTY_LENGTH;
+                    _trace("mpris::found_player_namespace: %s", value);
+                    strncpy((*namespaces) + offset, value, len);
                     player_count++;
                 }
             }
             dbus_message_iter_next(&arrayElementIter);
         }
     }
+
     dbus_message_unref(reply);
     // free the pending message handle
     dbus_pending_call_unref(pending);
@@ -804,22 +804,19 @@ static void dispatch(int fd, short ev, void *data)
 
 static void handle_dispatch_status(DBusConnection *conn, DBusDispatchStatus status, void *data)
 {
-    struct state *state = data;
+    struct mpris_player *player = data;
 
     if (status == DBUS_DISPATCH_DATA_REMAINS) {
         struct timeval tv = { .tv_sec = 0, .tv_usec = 100, };
 
-        event_add (state->events->dispatch, &tv);
+        event_add (player->events->dispatch, &tv);
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "DATA_REMAINS");
-        _trace("events::add_event(%p):dispatch", state->events->dispatch);
+        _trace("events::add_event(%p):dispatch", player->events->dispatch);
     }
     if (status == DBUS_DISPATCH_COMPLETE) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "COMPLETE");
 
-        for (size_t i = 0; i < state->player_count; i++) {
-            struct mpris_player *player = state->players[i];
-            state_loaded_properties(state, player->properties, player->changed);
-        }
+        state_loaded_properties(player, player->properties, player->changed);
     }
     if (status == DBUS_DISPATCH_NEED_MEMORY) {
         _trace("dbus::new_dispatch_status(%p): %s", (void*)conn, "OUT_OF_MEMORY");
@@ -828,8 +825,8 @@ static void handle_dispatch_status(DBusConnection *conn, DBusDispatchStatus stat
 
 static void handle_watch(int fd, short events, void *data)
 {
-    struct state *state = data;
-    struct dbus *ctx = state->dbus;
+    struct mpris_player *player = data;
+    struct dbus *ctx = player->dbus;
 
     DBusWatch *watch = ctx->watch;
 
@@ -849,8 +846,8 @@ static unsigned add_watch(DBusWatch *watch, void *data)
 {
     if (!dbus_watch_get_enabled(watch)) { return true;}
 
-    struct state *state = data;
-    state->dbus->watch = watch;
+    struct mpris_player *player = data;
+    player->dbus->watch = watch;
 
     int fd = dbus_watch_get_unix_fd(watch);
     unsigned flags = dbus_watch_get_flags(watch);
@@ -858,7 +855,7 @@ static unsigned add_watch(DBusWatch *watch, void *data)
     short cond = EV_PERSIST;
     if (flags & DBUS_WATCH_READABLE) { cond |= EV_READ; }
 
-    struct event *event = event_new(state->events->base, fd, cond, handle_watch, state);
+    struct event *event = event_new(player->events->base, fd, cond, handle_watch, player);
 
     if (NULL == event) { return false; }
     event_add(event, NULL);
@@ -897,7 +894,7 @@ static void toggle_watch(DBusWatch *watch, void *data)
 
 static DBusHandlerResult add_filter(DBusConnection *conn, DBusMessage *message, void *data)
 {
-    struct state *state = data;
+    struct mpris_player *player = data;
     if (dbus_message_is_signal(message, DBUS_PROPERTIES_INTERFACE, MPRIS_SIGNAL_PROPERTIES_CHANGED)) {
         _trace("dbus::filter(%p): %d %s -> %s %s/%s/%s %s",
                message,
@@ -911,11 +908,8 @@ static DBusHandlerResult add_filter(DBusConnection *conn, DBusMessage *message, 
                dbus_message_get_error_name(message) : "",
                conn
         );
-        for (size_t i = 0; i < state->player_count; i++) {
-            struct mpris_player *player = state->players[i];
-            DBusHandlerResult result = load_properties_from_message(message, player->properties, player->changed);
-            return result;
-        }
+        DBusHandlerResult result = load_properties_from_message(message, player->properties, player->changed);
+        return result;
     } else {
         _trace("dbus::filter:unknown_signal(%p) %d %s -> %s %s/%s/%s %s",
                message,
@@ -936,9 +930,9 @@ static DBusHandlerResult add_filter(DBusConnection *conn, DBusMessage *message, 
 
 static void handle_timeout(int fd, short ev, void *data)
 {
-    struct state *state = data;
+    struct mpris_player *player = data;
 
-    DBusTimeout *t = state->dbus->timeout;
+    DBusTimeout *t = player->dbus->timeout;
 
     _trace("dbus::timeout_reached: fd=%d ev=%p events=%d", fd, (void*)t, ev);
 
@@ -947,12 +941,12 @@ static void handle_timeout(int fd, short ev, void *data)
 
 static unsigned add_timeout(DBusTimeout *t, void *data)
 {
-    struct state *state = data;
+    struct mpris_player *player = data;
 
     if (!dbus_timeout_get_enabled(t)) { return 1; }
 
     _trace("dbus::add_timeout: %p data=%p", (void*)t, data);
-    struct event *event = event_new(state->events->base, -1, EV_TIMEOUT|EV_PERSIST, handle_timeout, t);
+    struct event *event = event_new(player->events->base, -1, EV_TIMEOUT|EV_PERSIST, handle_timeout, t);
     if (NULL == event) {
         _trace("dbus::add_timeout: failed");
     }
@@ -1035,6 +1029,7 @@ struct dbus *dbus_connection_init(struct state *state)
         goto _cleanup;
     }
 
+#if 0
     state->events->dispatch = calloc(1, sizeof(struct event));
     event_assign(state->events->dispatch, state->events->base, -1, EV_TIMEOUT, dispatch, state);
 
@@ -1057,6 +1052,7 @@ struct dbus *dbus_connection_init(struct state *state)
 
     const char *signal_sig = "type='signal',interface='" DBUS_PROPERTIES_INTERFACE "'";
     dbus_bus_add_match(conn, signal_sig, &err);
+#endif
 
     if (dbus_error_is_set(&err)) {
         _error("dbus::add_signal: %s", err.message);
